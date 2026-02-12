@@ -1,10 +1,13 @@
 use std::time::Duration;
 
+use smithay::backend::allocator::Fourcc;
 use smithay::{
     backend::{
         renderer::{
-            damage::OutputDamageTracker, element::surface::WaylandSurfaceRenderElement,
-            gles::{GlesRenderer, GlesTarget}, ExportMem, Texture,
+            damage::OutputDamageTracker,
+            element::surface::WaylandSurfaceRenderElement,
+            gles::{GlesRenderer, GlesTarget},
+            ExportMem, Texture,
         },
         winit::{self, WinitEvent},
     },
@@ -12,7 +15,6 @@ use smithay::{
     reexports::calloop::EventLoop,
     utils::{Rectangle, Transform},
 };
-use smithay::backend::allocator::Fourcc;
 
 use crate::{CalloopData, Smallvil};
 
@@ -40,7 +42,12 @@ pub fn init_winit(
         },
     );
     let _global = output.create_global::<Smallvil>(display_handle);
-    output.change_current_state(Some(mode), Some(Transform::Flipped180), None, Some((0, 0).into()));
+    output.change_current_state(
+        Some(mode),
+        Some(Transform::Flipped180),
+        None,
+        Some((0, 0).into()),
+    );
     output.set_preferred(mode);
 
     state.space.map_output(&output, (0, 0));
@@ -49,77 +56,85 @@ pub fn init_winit(
 
     std::env::set_var("WAYLAND_DISPLAY", &state.socket_name);
 
-    event_loop.handle().insert_source(winit, move |event, _, data| {
-        let display = &mut data.display_handle;
-        let state = &mut data.state;
+    event_loop
+        .handle()
+        .insert_source(winit, move |event, _, data| {
+            let display = &mut data.display_handle;
+            let state = &mut data.state;
 
-        match event {
-            WinitEvent::Resized { size, .. } => {
-                output.change_current_state(
-                    Some(Mode {
-                        size,
-                        refresh: 60_000,
-                    }),
-                    None,
-                    None,
-                    None,
-                );
-            }
-            WinitEvent::Input(event) => state.process_input_event(event),
-            WinitEvent::Redraw => {
-                let size = backend.window_size();
-                let damage = Rectangle::from_size(size);
-
-                {
-                    let (renderer, mut framebuffer) = backend.bind().unwrap();
-                    smithay::desktop::space::render_output::<
-                        _,
-                        WaylandSurfaceRenderElement<GlesRenderer>,
-                        _,
-                        _,
-                    >(
-                        &output,
-                        renderer,
-                        &mut framebuffer,
-                        1.0,
-                        0,
-                        [&state.space],
-                        &[],
-                        &mut damage_tracker,
-                        [0.1, 0.1, 0.1, 1.0],
-                    )
-                    .unwrap();
-
-                    // Handle pending screenshot
-                    if let Some((filename, response_tx)) = state.pending_screenshot.take() {
-                        let screenshot_result = take_screenshot(renderer, &framebuffer, size, &state.space, &filename);
-                        let _ = response_tx.send(screenshot_result);
-                    }
+            match event {
+                WinitEvent::Resized { size, .. } => {
+                    output.change_current_state(
+                        Some(Mode {
+                            size,
+                            refresh: 60_000,
+                        }),
+                        None,
+                        None,
+                        None,
+                    );
                 }
-                backend.submit(Some(&[damage])).unwrap();
+                WinitEvent::Input(event) => state.process_input_event(event),
+                WinitEvent::Redraw => {
+                    let size = backend.window_size();
+                    let damage = Rectangle::from_size(size);
 
-                state.space.elements().for_each(|window| {
-                    window.send_frame(
-                        &output,
-                        state.start_time.elapsed(),
-                        Some(Duration::ZERO),
-                        |_, _| Some(output.clone()),
-                    )
-                });
+                    {
+                        let (renderer, mut framebuffer) = backend.bind().unwrap();
+                        smithay::desktop::space::render_output::<
+                            _,
+                            WaylandSurfaceRenderElement<GlesRenderer>,
+                            _,
+                            _,
+                        >(
+                            &output,
+                            renderer,
+                            &mut framebuffer,
+                            1.0,
+                            0,
+                            [&state.space],
+                            &[],
+                            &mut damage_tracker,
+                            [0.1, 0.1, 0.1, 1.0],
+                        )
+                        .unwrap();
 
-                state.space.refresh();
-                state.popups.cleanup();
-                let _ = display.flush_clients();
+                        // Handle pending screenshot
+                        if let Some((filename, response_tx)) = state.pending_screenshot.take() {
+                            let screenshot_result = take_screenshot(
+                                renderer,
+                                &framebuffer,
+                                size,
+                                &state.space,
+                                &filename,
+                            );
+                            let _ = response_tx.send(screenshot_result);
+                        }
+                    }
+                    backend.submit(Some(&[damage])).unwrap();
 
-                // Ask for redraw to schedule new frame.
-                backend.window().request_redraw();
-            }
-            WinitEvent::CloseRequested => {
-                state.loop_signal.stop();
-            }
-            _ => (),
-        };
-    })?;
+                    state.space.elements().for_each(|window| {
+                        window.send_frame(
+                            &output,
+                            state.start_time.elapsed(),
+                            Some(Duration::ZERO),
+                            |_, _| Some(output.clone()),
+                        )
+                    });
+
+                    state.space.refresh();
+                    state.popups.cleanup();
+                    let _ = display.flush_clients();
+
+                    // Ask for redraw to schedule new frame.
+                    backend.window().request_redraw();
+                }
+                WinitEvent::CloseRequested => {
+                    state.loop_signal.stop();
+                }
+                _ => (),
+            };
+        })?;
 
     Ok(())
 }
@@ -131,9 +146,7 @@ fn take_screenshot(
     space: &smithay::desktop::Space<smithay::desktop::Window>,
     filename: &str,
 ) -> Result<String, String> {
-    let region = Rectangle::from_size(
-        (size.w as i32, size.h as i32).into()
-    );
+    let region = Rectangle::from_size((size.w, size.h).into());
 
     let mapping = renderer
         .copy_framebuffer(framebuffer, region, Fourcc::Abgr8888)
@@ -170,5 +183,10 @@ fn take_screenshot(
     img.save(filename)
         .map_err(|e| format!("Failed to save screenshot: {}", e))?;
 
-    Ok(format!("Screenshot saved to {} ({}x{})", filename, img.width(), img.height()))
+    Ok(format!(
+        "Screenshot saved to {} ({}x{})",
+        filename,
+        img.width(),
+        img.height()
+    ))
 }
