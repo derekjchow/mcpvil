@@ -1,0 +1,32 @@
+{
+  "name": "MCPvil Dev Container",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/rust:1": {
+      "version": "latest",
+      "profile": "default"
+    },
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "lts"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "tamasfe.even-better-toml",
+        "serayuzgur.crates"
+      ]
+    }
+  },
+  "initializeCommand": "mkdir -p .claude_home .gemini_home",
+  "mounts": [
+    "source=${localWorkspaceFolder}/.claude_home,target=/home/vscode/.claude,type=bind,consistency=cached",
+    "source=${localWorkspaceFolder}/.gemini_home,target=/home/vscode/.gemini,type=bind,consistency=cached"
+  ],
+  "remoteEnv": {
+    "RUST_LOG": "debug"
+  }
+}
