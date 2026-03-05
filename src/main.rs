@@ -55,6 +55,41 @@ pub struct CloseAppRequest {
     pid: u32,
 }
 
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct MouseMoveRequest {
+    /// X coordinate in the compositor space
+    x: f64,
+    /// Y coordinate in the compositor space
+    y: f64,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct MouseClickRequest {
+    /// X coordinate to click at
+    x: f64,
+    /// Y coordinate to click at
+    y: f64,
+    /// Mouse button: "left", "right", or "middle" (default: "left")
+    button: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct KeyPressRequest {
+    /// Linux evdev keycode (e.g. 28 for Enter, 1 for Escape)
+    key: u32,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct ScrollRequest {
+    /// X coordinate to scroll at
+    x: f64,
+    /// Y coordinate to scroll at
+    y: f64,
+    /// Scroll direction: "up", "down", "left", or "right"
+    direction: String,
+    /// Scroll amount in pixels (default: 15.0)
+    amount: Option<f64>,
+}
 
 pub enum McpCommand {
     LaunchApp {
@@ -71,6 +106,28 @@ pub enum McpCommand {
     },
     CloseApp {
         pid: u32,
+        response_tx: tokio::sync::oneshot::Sender<Result<(), String>>,
+    },
+    MouseMove {
+        x: f64,
+        y: f64,
+        response_tx: tokio::sync::oneshot::Sender<Result<(), String>>,
+    },
+    MouseClick {
+        x: f64,
+        y: f64,
+        button: u32,
+        response_tx: tokio::sync::oneshot::Sender<Result<(), String>>,
+    },
+    KeyPress {
+        key: u32,
+        response_tx: tokio::sync::oneshot::Sender<Result<(), String>>,
+    },
+    Scroll {
+        x: f64,
+        y: f64,
+        axis: smithay::backend::input::Axis,
+        amount: f64,
         response_tx: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
 }
@@ -93,6 +150,28 @@ impl std::fmt::Debug for McpCommand {
             McpCommand::CloseApp { pid, .. } => f
                 .debug_struct("CloseApp")
                 .field("pid", pid)
+                .finish(),
+            McpCommand::MouseMove { x, y, .. } => f
+                .debug_struct("MouseMove")
+                .field("x", x)
+                .field("y", y)
+                .finish(),
+            McpCommand::MouseClick { x, y, button, .. } => f
+                .debug_struct("MouseClick")
+                .field("x", x)
+                .field("y", y)
+                .field("button", button)
+                .finish(),
+            McpCommand::KeyPress { key, .. } => f
+                .debug_struct("KeyPress")
+                .field("key", key)
+                .finish(),
+            McpCommand::Scroll { x, y, axis, amount, .. } => f
+                .debug_struct("Scroll")
+                .field("x", x)
+                .field("y", y)
+                .field("axis", axis)
+                .field("amount", amount)
                 .finish(),
         }
     }
@@ -204,6 +283,168 @@ impl MCPvilServer {
             Err(e) => Ok(CallToolResult::success(vec![Content::text(format!(
                 "Failed to close process {}: {}",
                 pid, e
+            ))])),
+        }
+    }
+
+    #[tool(description = "Moves the mouse pointer to the specified coordinates")]
+    async fn mouse_move(
+        &self,
+        params: Parameters<MouseMoveRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+
+        self.command_tx
+            .send(McpCommand::MouseMove {
+                x: params.0.x,
+                y: params.0.y,
+                response_tx,
+            })
+            .map_err(|e| {
+                McpError::internal_error(format!("Failed to send command: {}", e), None)
+            })?;
+
+        let result = response_rx.await.map_err(|_| {
+            McpError::internal_error("Event loop dropped response channel".to_string(), None)
+        })?;
+
+        match result {
+            Ok(()) => Ok(CallToolResult::success(vec![Content::text(format!(
+                "Mouse moved to ({}, {})",
+                params.0.x, params.0.y
+            ))])),
+            Err(e) => Ok(CallToolResult::success(vec![Content::text(format!(
+                "Failed to move mouse: {}",
+                e
+            ))])),
+        }
+    }
+
+    #[tool(description = "Clicks a mouse button at the specified coordinates")]
+    async fn mouse_click(
+        &self,
+        params: Parameters<MouseClickRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        let button_name = params.0.button.as_deref().unwrap_or("left");
+        let button_code: u32 = match button_name {
+            "left" => 0x110,   // BTN_LEFT
+            "right" => 0x111,  // BTN_RIGHT
+            "middle" => 0x112, // BTN_MIDDLE
+            other => {
+                return Ok(CallToolResult::success(vec![Content::text(format!(
+                    "Unknown button '{}'. Use 'left', 'right', or 'middle'.",
+                    other
+                ))]));
+            }
+        };
+
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+
+        self.command_tx
+            .send(McpCommand::MouseClick {
+                x: params.0.x,
+                y: params.0.y,
+                button: button_code,
+                response_tx,
+            })
+            .map_err(|e| {
+                McpError::internal_error(format!("Failed to send command: {}", e), None)
+            })?;
+
+        let result = response_rx.await.map_err(|_| {
+            McpError::internal_error("Event loop dropped response channel".to_string(), None)
+        })?;
+
+        match result {
+            Ok(()) => Ok(CallToolResult::success(vec![Content::text(format!(
+                "Clicked {} at ({}, {})",
+                button_name, params.0.x, params.0.y
+            ))])),
+            Err(e) => Ok(CallToolResult::success(vec![Content::text(format!(
+                "Failed to click: {}",
+                e
+            ))])),
+        }
+    }
+
+    #[tool(description = "Simulates a key press and release using a Linux evdev keycode")]
+    async fn key_press(
+        &self,
+        params: Parameters<KeyPressRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+
+        self.command_tx
+            .send(McpCommand::KeyPress {
+                key: params.0.key,
+                response_tx,
+            })
+            .map_err(|e| {
+                McpError::internal_error(format!("Failed to send command: {}", e), None)
+            })?;
+
+        let result = response_rx.await.map_err(|_| {
+            McpError::internal_error("Event loop dropped response channel".to_string(), None)
+        })?;
+
+        match result {
+            Ok(()) => Ok(CallToolResult::success(vec![Content::text(format!(
+                "Key {} pressed and released",
+                params.0.key
+            ))])),
+            Err(e) => Ok(CallToolResult::success(vec![Content::text(format!(
+                "Failed to press key: {}",
+                e
+            ))])),
+        }
+    }
+
+    #[tool(description = "Scrolls at the specified coordinates in the given direction")]
+    async fn scroll(
+        &self,
+        params: Parameters<ScrollRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        use smithay::backend::input::Axis;
+
+        let (axis, amount) = match params.0.direction.as_str() {
+            "up" => (Axis::Vertical, -(params.0.amount.unwrap_or(15.0))),
+            "down" => (Axis::Vertical, params.0.amount.unwrap_or(15.0)),
+            "left" => (Axis::Horizontal, -(params.0.amount.unwrap_or(15.0))),
+            "right" => (Axis::Horizontal, params.0.amount.unwrap_or(15.0)),
+            other => {
+                return Ok(CallToolResult::success(vec![Content::text(format!(
+                    "Unknown direction '{}'. Use 'up', 'down', 'left', or 'right'.",
+                    other
+                ))]));
+            }
+        };
+
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+
+        self.command_tx
+            .send(McpCommand::Scroll {
+                x: params.0.x,
+                y: params.0.y,
+                axis,
+                amount,
+                response_tx,
+            })
+            .map_err(|e| {
+                McpError::internal_error(format!("Failed to send command: {}", e), None)
+            })?;
+
+        let result = response_rx.await.map_err(|_| {
+            McpError::internal_error("Event loop dropped response channel".to_string(), None)
+        })?;
+
+        match result {
+            Ok(()) => Ok(CallToolResult::success(vec![Content::text(format!(
+                "Scrolled {} at ({}, {})",
+                params.0.direction, params.0.x, params.0.y
+            ))])),
+            Err(e) => Ok(CallToolResult::success(vec![Content::text(format!(
+                "Failed to scroll: {}",
+                e
             ))])),
         }
     }
@@ -325,6 +566,172 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         tracing::error!("Failed to kill process {}: {}", pid, err);
                         let _ = response_tx.send(Err(err.to_string()));
                     }
+                }
+                McpCommand::MouseMove { x, y, response_tx } => {
+                    use smithay::input::pointer::MotionEvent;
+                    use smithay::utils::SERIAL_COUNTER;
+
+                    let pos = (x, y).into();
+                    let serial = SERIAL_COUNTER.next_serial();
+                    let pointer = _data.state.seat.get_pointer().unwrap();
+                    let under = _data.state.surface_under(pos);
+                    let time = _data.state.start_time.elapsed().as_millis() as u32;
+
+                    pointer.motion(
+                        &mut _data.state,
+                        under,
+                        &MotionEvent {
+                            location: pos,
+                            serial,
+                            time,
+                        },
+                    );
+                    pointer.frame(&mut _data.state);
+                    let _ = response_tx.send(Ok(()));
+                }
+                McpCommand::MouseClick { x, y, button, response_tx } => {
+                    use smithay::backend::input::ButtonState;
+                    use smithay::input::pointer::{ButtonEvent, MotionEvent};
+                    use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
+                    use smithay::utils::SERIAL_COUNTER;
+
+                    let pos = (x, y).into();
+                    let time = _data.state.start_time.elapsed().as_millis() as u32;
+
+                    // Move pointer to position first
+                    let serial = SERIAL_COUNTER.next_serial();
+                    let pointer = _data.state.seat.get_pointer().unwrap();
+                    let keyboard = _data.state.seat.get_keyboard().unwrap();
+                    let under = _data.state.surface_under(pos);
+
+                    pointer.motion(
+                        &mut _data.state,
+                        under,
+                        &MotionEvent {
+                            location: pos,
+                            serial,
+                            time,
+                        },
+                    );
+                    pointer.frame(&mut _data.state);
+
+                    // Focus/raise logic (same as input.rs)
+                    let serial = SERIAL_COUNTER.next_serial();
+                    if !pointer.is_grabbed() {
+                        if let Some((window, _loc)) = _data
+                            .state
+                            .space
+                            .element_under(pointer.current_location())
+                            .map(|(w, l)| (w.clone(), l))
+                        {
+                            _data.state.space.raise_element(&window, true);
+                            keyboard.set_focus(
+                                &mut _data.state,
+                                Some(window.toplevel().unwrap().wl_surface().clone()),
+                                serial,
+                            );
+                            _data.state.space.elements().for_each(|window| {
+                                window.toplevel().unwrap().send_pending_configure();
+                            });
+                        } else {
+                            _data.state.space.elements().for_each(|window| {
+                                window.set_activated(false);
+                                window.toplevel().unwrap().send_pending_configure();
+                            });
+                            keyboard.set_focus(
+                                &mut _data.state,
+                                Option::<WlSurface>::None,
+                                serial,
+                            );
+                        }
+                    }
+
+                    // Press
+                    pointer.button(
+                        &mut _data.state,
+                        &ButtonEvent {
+                            button,
+                            state: ButtonState::Pressed,
+                            serial,
+                            time,
+                        },
+                    );
+                    pointer.frame(&mut _data.state);
+
+                    // Release
+                    let serial = SERIAL_COUNTER.next_serial();
+                    pointer.button(
+                        &mut _data.state,
+                        &ButtonEvent {
+                            button,
+                            state: ButtonState::Released,
+                            serial,
+                            time,
+                        },
+                    );
+                    pointer.frame(&mut _data.state);
+                    let _ = response_tx.send(Ok(()));
+                }
+                McpCommand::KeyPress { key, response_tx } => {
+                    use smithay::backend::input::KeyState;
+                    use smithay::input::keyboard::FilterResult;
+                    use smithay::utils::SERIAL_COUNTER;
+
+                    let serial = SERIAL_COUNTER.next_serial();
+                    let time = _data.state.start_time.elapsed().as_millis() as u32;
+                    let keyboard = _data.state.seat.get_keyboard().unwrap();
+
+                    keyboard.input::<(), _>(
+                        &mut _data.state,
+                        key.into(),
+                        KeyState::Pressed,
+                        serial,
+                        time,
+                        |_, _, _| FilterResult::Forward,
+                    );
+
+                    let serial = SERIAL_COUNTER.next_serial();
+                    keyboard.input::<(), _>(
+                        &mut _data.state,
+                        key.into(),
+                        KeyState::Released,
+                        serial,
+                        time,
+                        |_, _, _| FilterResult::Forward,
+                    );
+                    let _ = response_tx.send(Ok(()));
+                }
+                McpCommand::Scroll { x, y, axis, amount, response_tx } => {
+                    use smithay::backend::input::AxisSource;
+                    use smithay::input::pointer::{AxisFrame, MotionEvent};
+                    use smithay::utils::SERIAL_COUNTER;
+
+                    let pos = (x, y).into();
+                    let time = _data.state.start_time.elapsed().as_millis() as u32;
+
+                    // Move pointer to position first
+                    let serial = SERIAL_COUNTER.next_serial();
+                    let pointer = _data.state.seat.get_pointer().unwrap();
+                    let under = _data.state.surface_under(pos);
+
+                    pointer.motion(
+                        &mut _data.state,
+                        under,
+                        &MotionEvent {
+                            location: pos,
+                            serial,
+                            time,
+                        },
+                    );
+                    pointer.frame(&mut _data.state);
+
+                    // Scroll
+                    let frame = AxisFrame::new(time)
+                        .source(AxisSource::Wheel)
+                        .value(axis, amount);
+                    pointer.axis(&mut _data.state, frame);
+                    pointer.frame(&mut _data.state);
+                    let _ = response_tx.send(Ok(()));
                 }
             },
             smithay::reexports::calloop::channel::Event::Closed => {
