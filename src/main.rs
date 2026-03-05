@@ -46,6 +46,10 @@ pub struct ScreenshotRequest {
     filename: String,
 }
 
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct CaptureScreenshotRequest {}
+
+
 pub enum McpCommand {
     LaunchApp {
         command: String,
@@ -55,6 +59,9 @@ pub enum McpCommand {
     Screenshot {
         filename: String,
         response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
+    CaptureScreenshot {
+        response_tx: tokio::sync::oneshot::Sender<Result<(String, u32, u32), String>>,
     },
 }
 
@@ -69,6 +76,9 @@ impl std::fmt::Debug for McpCommand {
             McpCommand::Screenshot { filename, .. } => f
                 .debug_struct("Screenshot")
                 .field("filename", filename)
+                .finish(),
+            McpCommand::CaptureScreenshot { .. } => f
+                .debug_struct("CaptureScreenshot")
                 .finish(),
         }
     }
@@ -153,6 +163,35 @@ impl MCPvilServer {
             ))])),
         }
     }
+
+    #[tool(description = "Captures a screenshot of the compositor output and returns it as a base64-encoded PNG image")]
+    async fn capture_screenshot(
+        &self,
+        #[allow(unused_variables)] params: Parameters<CaptureScreenshotRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+
+        self.command_tx
+            .send(McpCommand::CaptureScreenshot { response_tx })
+            .map_err(|e| {
+                McpError::internal_error(format!("Failed to send command: {}", e), None)
+            })?;
+
+        let result = response_rx.await.map_err(|_| {
+            McpError::internal_error("Event loop dropped response channel".to_string(), None)
+        })?;
+
+        match result {
+            Ok((base64_data, width, height)) => Ok(CallToolResult::success(vec![
+                Content::image(base64_data, "image/png"),
+                Content::text(format!("Screenshot captured ({}x{})", width, height)),
+            ])),
+            Err(e) => Ok(CallToolResult::success(vec![Content::text(format!(
+                "Failed to capture screenshot: {}",
+                e
+            ))])),
+        }
+    }
 }
 
 #[tool_handler]
@@ -229,6 +268,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     response_tx,
                 } => {
                     _data.state.pending_screenshot = Some((filename, response_tx));
+                }
+                McpCommand::CaptureScreenshot { response_tx } => {
+                    _data.state.pending_capture_screenshot = Some(response_tx);
                 }
             },
             smithay::reexports::calloop::channel::Event::Closed => {

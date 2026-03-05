@@ -1,5 +1,7 @@
+use std::io::Cursor;
 use std::time::Duration;
 
+use base64::Engine;
 use smithay::backend::allocator::Fourcc;
 use smithay::{
     backend::{
@@ -110,6 +112,17 @@ pub fn init_winit(
                             );
                             let _ = response_tx.send(screenshot_result);
                         }
+
+                        // Handle pending capture_screenshot
+                        if let Some(response_tx) = state.pending_capture_screenshot.take() {
+                            let capture_result = capture_screenshot(
+                                renderer,
+                                &framebuffer,
+                                size,
+                                &state.space,
+                            );
+                            let _ = response_tx.send(capture_result);
+                        }
                     }
                     backend.submit(Some(&[damage])).unwrap();
 
@@ -189,4 +202,50 @@ fn take_screenshot(
         img.width(),
         img.height()
     ))
+}
+
+fn capture_screenshot(
+    renderer: &mut GlesRenderer,
+    framebuffer: &GlesTarget<'_>,
+    size: smithay::utils::Size<i32, smithay::utils::Physical>,
+    space: &smithay::desktop::Space<smithay::desktop::Window>,
+) -> Result<(String, u32, u32), String> {
+    let region = Rectangle::from_size((size.w, size.h).into());
+
+    let mapping = renderer
+        .copy_framebuffer(framebuffer, region, Fourcc::Abgr8888)
+        .map_err(|e| format!("Failed to copy framebuffer: {}", e))?;
+
+    let pixels = renderer
+        .map_texture(&mapping)
+        .map_err(|e| format!("Failed to map texture: {}", e))?;
+
+    let width = mapping.width();
+    let height = mapping.height();
+
+    let mut img = image::RgbaImage::from_raw(width, height, pixels.to_vec())
+        .ok_or_else(|| "Failed to create image from pixel data".to_string())?;
+    image::imageops::flip_vertical_in_place(&mut img);
+
+    let img: image::DynamicImage = if let Some(window) = space.elements().next() {
+        if let Some(geo) = space.element_geometry(window) {
+            let x = geo.loc.x.max(0) as u32;
+            let y = geo.loc.y.max(0) as u32;
+            let w = (geo.size.w as u32).min(width.saturating_sub(x));
+            let h = (geo.size.h as u32).min(height.saturating_sub(y));
+            image::DynamicImage::ImageRgba8(img).crop_imm(x, y, w, h)
+        } else {
+            image::DynamicImage::ImageRgba8(img)
+        }
+    } else {
+        image::DynamicImage::ImageRgba8(img)
+    };
+
+    let mut buf = Cursor::new(Vec::new());
+    img.write_to(&mut buf, image::ImageFormat::Png)
+        .map_err(|e| format!("Failed to encode PNG: {}", e))?;
+
+    let base64_data = base64::engine::general_purpose::STANDARD.encode(buf.into_inner());
+
+    Ok((base64_data, img.width(), img.height()))
 }

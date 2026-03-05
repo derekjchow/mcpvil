@@ -45,6 +45,10 @@ pub struct Smallvil {
 
     // Pending screenshot request: (filename, response_tx)
     pub pending_screenshot: Option<(String, tokio::sync::oneshot::Sender<Result<String, String>>)>,
+
+    // Pending capture_screenshot request: response_tx returns (base64_data, width, height)
+    #[allow(clippy::type_complexity)]
+    pub pending_capture_screenshot: Option<tokio::sync::oneshot::Sender<Result<(String, u32, u32), String>>>,
 }
 
 impl Smallvil {
@@ -101,6 +105,7 @@ impl Smallvil {
             popups,
             seat,
             pending_screenshot: None,
+            pending_capture_screenshot: None,
         }
     }
 
