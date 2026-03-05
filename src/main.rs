@@ -49,6 +49,12 @@ pub struct ScreenshotRequest {
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct CaptureScreenshotRequest {}
 
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct CloseAppRequest {
+    /// The process ID (PID) of the application to close, as returned by launch_app
+    pid: u32,
+}
+
 
 pub enum McpCommand {
     LaunchApp {
@@ -62,6 +68,10 @@ pub enum McpCommand {
     },
     CaptureScreenshot {
         response_tx: tokio::sync::oneshot::Sender<Result<(String, u32, u32), String>>,
+    },
+    CloseApp {
+        pid: u32,
+        response_tx: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
 }
 
@@ -79,6 +89,10 @@ impl std::fmt::Debug for McpCommand {
                 .finish(),
             McpCommand::CaptureScreenshot { .. } => f
                 .debug_struct("CaptureScreenshot")
+                .finish(),
+            McpCommand::CloseApp { pid, .. } => f
+                .debug_struct("CloseApp")
+                .field("pid", pid)
                 .finish(),
         }
     }
@@ -160,6 +174,36 @@ impl MCPvilServer {
             Err(e) => Ok(CallToolResult::success(vec![Content::text(format!(
                 "Failed to take screenshot: {}",
                 e
+            ))])),
+        }
+    }
+
+    #[tool(description = "Closes/kills an application by its PID (as returned by launch_app)")]
+    async fn close_app(
+        &self,
+        params: Parameters<CloseAppRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        let pid = params.0.pid;
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+
+        self.command_tx
+            .send(McpCommand::CloseApp { pid, response_tx })
+            .map_err(|e| {
+                McpError::internal_error(format!("Failed to send command: {}", e), None)
+            })?;
+
+        let result = response_rx.await.map_err(|_| {
+            McpError::internal_error("Event loop dropped response channel".to_string(), None)
+        })?;
+
+        match result {
+            Ok(()) => Ok(CallToolResult::success(vec![Content::text(format!(
+                "Sent SIGTERM to process {}",
+                pid
+            ))])),
+            Err(e) => Ok(CallToolResult::success(vec![Content::text(format!(
+                "Failed to close process {}: {}",
+                pid, e
             ))])),
         }
     }
@@ -271,6 +315,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 McpCommand::CaptureScreenshot { response_tx } => {
                     _data.state.pending_capture_screenshot = Some(response_tx);
+                }
+                McpCommand::CloseApp { pid, response_tx } => {
+                    let result = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+                    if result == 0 {
+                        let _ = response_tx.send(Ok(()));
+                    } else {
+                        let err = std::io::Error::last_os_error();
+                        tracing::error!("Failed to kill process {}: {}", pid, err);
+                        let _ = response_tx.send(Err(err.to_string()));
+                    }
                 }
             },
             smithay::reexports::calloop::channel::Event::Closed => {

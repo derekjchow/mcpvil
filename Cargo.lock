@@ -1224,6 +1224,7 @@ dependencies = [
  "base64",
  "bitflags 2.11.0",
  "image",
+ "libc",
  "rmcp",
  "serde",
  "serde_json",
