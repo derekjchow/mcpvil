@@ -4,7 +4,9 @@ use smithay::{
     desktop::{PopupManager, Space, Window, WindowSurfaceType},
     input::{Seat, SeatState},
     reexports::{
-        calloop::{generic::Generic, EventLoop, Interest, LoopHandle, LoopSignal, Mode, PostAction},
+        calloop::{
+            generic::Generic, EventLoop, Interest, LoopHandle, LoopSignal, Mode, PostAction,
+        },
         wayland_server::{
             backend::{ClientData, ClientId, DisconnectReason},
             protocol::wl_surface::WlSurface,
@@ -52,11 +54,16 @@ pub struct Smallvil {
 
     // Pending capture_screenshot request: response_tx returns (base64_data, width, height)
     #[allow(clippy::type_complexity)]
-    pub pending_capture_screenshot: Option<tokio::sync::oneshot::Sender<Result<(String, u32, u32), String>>>,
+    pub pending_capture_screenshot:
+        Option<tokio::sync::oneshot::Sender<Result<(String, u32, u32), String>>>,
 }
 
 impl Smallvil {
-    pub fn new(event_loop: &mut EventLoop<CalloopData>, display: Display<Self>, loop_handle: LoopHandle<'static, CalloopData>) -> Self {
+    pub fn new(
+        event_loop: &mut EventLoop<CalloopData>,
+        display: Display<Self>,
+        loop_handle: LoopHandle<'static, CalloopData>,
+    ) -> Self {
         let start_time = std::time::Instant::now();
 
         let dh = display.handle();

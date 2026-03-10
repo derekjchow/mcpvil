@@ -6,12 +6,14 @@ use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::pixman::{PixmanRenderer, PixmanTarget};
 use smithay::{
     backend::renderer::{
-        damage::OutputDamageTracker,
-        element::surface::WaylandSurfaceRenderElement,
-        Bind, ExportMem, Offscreen, Texture,
+        damage::OutputDamageTracker, element::surface::WaylandSurfaceRenderElement, Bind,
+        ExportMem, Offscreen, Texture,
     },
     output::{Mode, Output, PhysicalProperties, Subpixel},
-    reexports::calloop::{timer::{TimeoutAction, Timer}, EventLoop},
+    reexports::calloop::{
+        timer::{TimeoutAction, Timer},
+        EventLoop,
+    },
     utils::{Buffer as BufferCoords, Rectangle, Size, Transform},
 };
 
@@ -100,12 +102,8 @@ pub fn init_headless(
 
                 // Handle pending capture_screenshot
                 if let Some(response_tx) = state.pending_capture_screenshot.take() {
-                    let capture_result = capture_screenshot(
-                        &mut renderer,
-                        &target,
-                        output_size,
-                        &state.space,
-                    );
+                    let capture_result =
+                        capture_screenshot(&mut renderer, &target, output_size, &state.space);
                     let _ = response_tx.send(capture_result);
                 }
             }

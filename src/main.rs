@@ -11,18 +11,12 @@ mod winit;
 use rmcp::{
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{CallToolResult, Content, ServerCapabilities, ServerInfo},
-    schemars,
-    tool,
-    tool_handler,
-    tool_router,
+    schemars, tool, tool_handler, tool_router,
     transport::stdio,
-    ErrorData as McpError,
-    ServerHandler,
-    ServiceExt,
+    ErrorData as McpError, ServerHandler, ServiceExt,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-
 
 use smithay::reexports::{
     calloop::EventLoop,
@@ -151,13 +145,10 @@ impl std::fmt::Debug for McpCommand {
                 .debug_struct("Screenshot")
                 .field("filename", filename)
                 .finish(),
-            McpCommand::CaptureScreenshot { .. } => f
-                .debug_struct("CaptureScreenshot")
-                .finish(),
-            McpCommand::CloseApp { pid, .. } => f
-                .debug_struct("CloseApp")
-                .field("pid", pid)
-                .finish(),
+            McpCommand::CaptureScreenshot { .. } => f.debug_struct("CaptureScreenshot").finish(),
+            McpCommand::CloseApp { pid, .. } => {
+                f.debug_struct("CloseApp").field("pid", pid).finish()
+            }
             McpCommand::MouseMove { x, y, .. } => f
                 .debug_struct("MouseMove")
                 .field("x", x)
@@ -169,20 +160,19 @@ impl std::fmt::Debug for McpCommand {
                 .field("y", y)
                 .field("button", button)
                 .finish(),
-            McpCommand::KeyPress { key, .. } => f
-                .debug_struct("KeyPress")
-                .field("key", key)
-                .finish(),
-            McpCommand::Scroll { x, y, axis, amount, .. } => f
+            McpCommand::KeyPress { key, .. } => {
+                f.debug_struct("KeyPress").field("key", key).finish()
+            }
+            McpCommand::Scroll {
+                x, y, axis, amount, ..
+            } => f
                 .debug_struct("Scroll")
                 .field("x", x)
                 .field("y", y)
                 .field("axis", axis)
                 .field("amount", amount)
                 .finish(),
-            McpCommand::OpenWindow { .. } => f
-                .debug_struct("OpenWindow")
-                .finish(),
+            McpCommand::OpenWindow { .. } => f.debug_struct("OpenWindow").finish(),
         }
     }
 }
@@ -410,10 +400,7 @@ impl MCPvilServer {
     }
 
     #[tool(description = "Scrolls at the specified coordinates in the given direction")]
-    async fn scroll(
-        &self,
-        params: Parameters<ScrollRequest>,
-    ) -> Result<CallToolResult, McpError> {
+    async fn scroll(&self, params: Parameters<ScrollRequest>) -> Result<CallToolResult, McpError> {
         use smithay::backend::input::Axis;
 
         let (axis, amount) = match params.0.direction.as_str() {
@@ -459,7 +446,9 @@ impl MCPvilServer {
         }
     }
 
-    #[tool(description = "Captures a screenshot of the compositor output and returns it as a base64-encoded PNG image")]
+    #[tool(
+        description = "Captures a screenshot of the compositor output and returns it as a base64-encoded PNG image"
+    )]
     async fn capture_screenshot(
         &self,
         #[allow(unused_variables)] params: Parameters<CaptureScreenshotRequest>,
@@ -488,7 +477,9 @@ impl MCPvilServer {
         }
     }
 
-    #[tool(description = "Opens a GUI window to visually inspect the compositor. Only works when a display server is available.")]
+    #[tool(
+        description = "Opens a GUI window to visually inspect the compositor. Only works when a display server is available."
+    )]
     async fn open_window(
         &self,
         #[allow(unused_variables)] params: Parameters<OpenWindowRequest>,
@@ -571,7 +562,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match args_iter.next().as_deref() {
         Some("-c") | Some("--command") => {
             if let Some(command) = args_iter.next() {
-                std::process::Command::new(command).args(args_iter).spawn().ok();
+                std::process::Command::new(command)
+                    .args(args_iter)
+                    .spawn()
+                    .ok();
             }
         }
         _ => {}
@@ -641,7 +635,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     pointer.frame(&mut _data.state);
                     let _ = response_tx.send(Ok(()));
                 }
-                McpCommand::MouseClick { x, y, button, response_tx } => {
+                McpCommand::MouseClick {
+                    x,
+                    y,
+                    button,
+                    response_tx,
+                } => {
                     use smithay::backend::input::ButtonState;
                     use smithay::input::pointer::{ButtonEvent, MotionEvent};
                     use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
@@ -690,11 +689,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 window.set_activated(false);
                                 window.toplevel().unwrap().send_pending_configure();
                             });
-                            keyboard.set_focus(
-                                &mut _data.state,
-                                Option::<WlSurface>::None,
-                                serial,
-                            );
+                            keyboard.set_focus(&mut _data.state, Option::<WlSurface>::None, serial);
                         }
                     }
 
@@ -753,7 +748,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     );
                     let _ = response_tx.send(Ok(()));
                 }
-                McpCommand::Scroll { x, y, axis, amount, response_tx } => {
+                McpCommand::Scroll {
+                    x,
+                    y,
+                    axis,
+                    amount,
+                    response_tx,
+                } => {
                     use smithay::backend::input::AxisSource;
                     use smithay::input::pointer::{AxisFrame, MotionEvent};
                     use smithay::utils::SERIAL_COUNTER;

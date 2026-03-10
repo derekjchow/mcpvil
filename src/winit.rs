@@ -62,95 +62,85 @@ pub fn init_winit(
 
     let mut damage_tracker = OutputDamageTracker::from_output(&output);
 
-    handle
-        .insert_source(winit, move |event, _, data| {
-            let display = &mut data.display_handle;
-            let state = &mut data.state;
+    handle.insert_source(winit, move |event, _, data| {
+        let display = &mut data.display_handle;
+        let state = &mut data.state;
 
-            match event {
-                WinitEvent::Resized { size, .. } => {
-                    output.change_current_state(
-                        Some(Mode {
-                            size,
-                            refresh: 60_000,
-                        }),
-                        None,
-                        None,
-                        None,
-                    );
-                }
-                WinitEvent::Input(event) => state.process_input_event(event),
-                WinitEvent::Redraw => {
-                    let size = backend.window_size();
-                    let damage = Rectangle::from_size(size);
+        match event {
+            WinitEvent::Resized { size, .. } => {
+                output.change_current_state(
+                    Some(Mode {
+                        size,
+                        refresh: 60_000,
+                    }),
+                    None,
+                    None,
+                    None,
+                );
+            }
+            WinitEvent::Input(event) => state.process_input_event(event),
+            WinitEvent::Redraw => {
+                let size = backend.window_size();
+                let damage = Rectangle::from_size(size);
 
-                    {
-                        let (renderer, mut framebuffer) = backend.bind().unwrap();
-                        smithay::desktop::space::render_output::<
-                            _,
-                            WaylandSurfaceRenderElement<GlesRenderer>,
-                            _,
-                            _,
-                        >(
-                            &output,
-                            renderer,
-                            &mut framebuffer,
-                            1.0,
-                            0,
-                            [&state.space],
-                            &[],
-                            &mut damage_tracker,
-                            [0.1, 0.1, 0.1, 1.0],
-                        )
-                        .unwrap();
+                {
+                    let (renderer, mut framebuffer) = backend.bind().unwrap();
+                    smithay::desktop::space::render_output::<
+                        _,
+                        WaylandSurfaceRenderElement<GlesRenderer>,
+                        _,
+                        _,
+                    >(
+                        &output,
+                        renderer,
+                        &mut framebuffer,
+                        1.0,
+                        0,
+                        [&state.space],
+                        &[],
+                        &mut damage_tracker,
+                        [0.1, 0.1, 0.1, 1.0],
+                    )
+                    .unwrap();
 
-                        // Handle pending screenshot
-                        if let Some((filename, response_tx)) = state.pending_screenshot.take() {
-                            let screenshot_result = take_screenshot(
-                                renderer,
-                                &framebuffer,
-                                size,
-                                &state.space,
-                                &filename,
-                            );
-                            let _ = response_tx.send(screenshot_result);
-                        }
-
-                        // Handle pending capture_screenshot
-                        if let Some(response_tx) = state.pending_capture_screenshot.take() {
-                            let capture_result = capture_screenshot(
-                                renderer,
-                                &framebuffer,
-                                size,
-                                &state.space,
-                            );
-                            let _ = response_tx.send(capture_result);
-                        }
+                    // Handle pending screenshot
+                    if let Some((filename, response_tx)) = state.pending_screenshot.take() {
+                        let screenshot_result =
+                            take_screenshot(renderer, &framebuffer, size, &state.space, &filename);
+                        let _ = response_tx.send(screenshot_result);
                     }
-                    backend.submit(Some(&[damage])).unwrap();
 
-                    state.space.elements().for_each(|window| {
-                        window.send_frame(
-                            &output,
-                            state.start_time.elapsed(),
-                            Some(Duration::ZERO),
-                            |_, _| Some(output.clone()),
-                        )
-                    });
-
-                    state.space.refresh();
-                    state.popups.cleanup();
-                    let _ = display.flush_clients();
-
-                    // Ask for redraw to schedule new frame.
-                    backend.window().request_redraw();
+                    // Handle pending capture_screenshot
+                    if let Some(response_tx) = state.pending_capture_screenshot.take() {
+                        let capture_result =
+                            capture_screenshot(renderer, &framebuffer, size, &state.space);
+                        let _ = response_tx.send(capture_result);
+                    }
                 }
-                WinitEvent::CloseRequested => {
-                    state.loop_signal.stop();
-                }
-                _ => (),
-            };
-        })?;
+                backend.submit(Some(&[damage])).unwrap();
+
+                state.space.elements().for_each(|window| {
+                    window.send_frame(
+                        &output,
+                        state.start_time.elapsed(),
+                        Some(Duration::ZERO),
+                        |_, _| Some(output.clone()),
+                    )
+                });
+
+                state.space.refresh();
+                state.popups.cleanup();
+                let _ = display.flush_clients();
+
+                // Ask for redraw to schedule new frame.
+                backend.window().request_redraw();
+            }
+            WinitEvent::CloseRequested => {
+                state.loop_signal.stop();
+            }
+            _ => (),
+        };
+    })?;
 
     Ok(())
 }
