@@ -3,6 +3,7 @@
 mod handlers;
 
 mod grabs;
+mod headless;
 mod input;
 mod state;
 mod winit;
@@ -80,6 +81,9 @@ pub struct KeyPressRequest {
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
+pub struct OpenWindowRequest {}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
 pub struct ScrollRequest {
     /// X coordinate to scroll at
     x: f64,
@@ -130,6 +134,9 @@ pub enum McpCommand {
         amount: f64,
         response_tx: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
+    OpenWindow {
+        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
 }
 
 impl std::fmt::Debug for McpCommand {
@@ -172,6 +179,9 @@ impl std::fmt::Debug for McpCommand {
                 .field("y", y)
                 .field("axis", axis)
                 .field("amount", amount)
+                .finish(),
+            McpCommand::OpenWindow { .. } => f
+                .debug_struct("OpenWindow")
                 .finish(),
         }
     }
@@ -477,6 +487,32 @@ impl MCPvilServer {
             ))])),
         }
     }
+
+    #[tool(description = "Opens a GUI window to visually inspect the compositor. Only works when a display server is available.")]
+    async fn open_window(
+        &self,
+        #[allow(unused_variables)] params: Parameters<OpenWindowRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+
+        self.command_tx
+            .send(McpCommand::OpenWindow { response_tx })
+            .map_err(|e| {
+                McpError::internal_error(format!("Failed to send command: {}", e), None)
+            })?;
+
+        let result = response_rx.await.map_err(|_| {
+            McpError::internal_error("Event loop dropped response channel".to_string(), None)
+        })?;
+
+        match result {
+            Ok(msg) => Ok(CallToolResult::success(vec![Content::text(msg)])),
+            Err(e) => Ok(CallToolResult::success(vec![Content::text(format!(
+                "Failed to open window: {}",
+                e
+            ))])),
+        }
+    }
 }
 
 #[tool_handler]
@@ -504,22 +540,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut event_loop: EventLoop<CalloopData> = EventLoop::try_new()?;
 
+    // Parse CLI arguments
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let gui_mode = args.iter().any(|a| a == "--gui");
+    let args_without_gui: Vec<String> = args.into_iter().filter(|a| a != "--gui").collect();
+
     let display: Display<Smallvil> = Display::new()?;
     let display_handle = display.handle();
-    let state = Smallvil::new(&mut event_loop, display);
+    let loop_handle = event_loop.handle();
+    let state = Smallvil::new(&mut event_loop, display, loop_handle);
 
     let mut data = CalloopData {
         state,
         display_handle,
     };
 
-    crate::winit::init_winit(&mut event_loop, &mut data)?;
+    if gui_mode {
+        crate::winit::init_winit(event_loop.handle(), &mut data, true)?;
+        data.state.window_opened = true;
+    } else {
+        crate::headless::init_headless(&mut event_loop, &mut data)?;
+    }
 
-    let mut args = std::env::args().skip(1);
-    match args.next().as_deref() {
+    // Set WAYLAND_DISPLAY after backend init so that child processes connect
+    // to our compositor, and so winit::init() (if called later via open_window)
+    // doesn't try to connect to our own socket.
+    std::env::set_var("WAYLAND_DISPLAY", &data.state.socket_name);
+
+    let mut args_iter = args_without_gui.into_iter();
+    match args_iter.next().as_deref() {
         Some("-c") | Some("--command") => {
-            if let Some(command) = args.next() {
-                std::process::Command::new(command).args(args).spawn().ok();
+            if let Some(command) = args_iter.next() {
+                std::process::Command::new(command).args(args_iter).spawn().ok();
             }
         }
         _ => {}
@@ -732,6 +784,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     pointer.axis(&mut _data.state, frame);
                     pointer.frame(&mut _data.state);
                     let _ = response_tx.send(Ok(()));
+                }
+                McpCommand::OpenWindow { response_tx } => {
+                    if _data.state.window_opened {
+                        let _ = response_tx.send(Err("Window is already open".to_string()));
+                    } else {
+                        let handle = _data.state.loop_handle.clone();
+                        // Temporarily unset WAYLAND_DISPLAY so winit connects to the
+                        // host display server instead of our own compositor socket.
+                        let saved_wayland = std::env::var("WAYLAND_DISPLAY").ok();
+                        std::env::remove_var("WAYLAND_DISPLAY");
+                        let result = crate::winit::init_winit(handle, _data, false);
+                        // Restore WAYLAND_DISPLAY for child processes
+                        if let Some(val) = saved_wayland {
+                            std::env::set_var("WAYLAND_DISPLAY", val);
+                        }
+                        match result {
+                            Ok(()) => {
+                                _data.state.window_opened = true;
+                                let _ = response_tx.send(Ok("GUI window opened".to_string()));
+                            }
+                            Err(e) => {
+                                let _ = response_tx.send(Err(format!(
+                                    "Failed to open window (no display available?): {}",
+                                    e
+                                )));
+                            }
+                        }
+                    }
                 }
             },
             smithay::reexports::calloop::channel::Event::Closed => {

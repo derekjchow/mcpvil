@@ -14,15 +14,16 @@ use smithay::{
         winit::{self, WinitEvent},
     },
     output::{Mode, Output, PhysicalProperties, Subpixel},
-    reexports::calloop::EventLoop,
+    reexports::calloop::LoopHandle,
     utils::{Rectangle, Transform},
 };
 
 use crate::{CalloopData, Smallvil};
 
 pub fn init_winit(
-    event_loop: &mut EventLoop<CalloopData>,
+    handle: LoopHandle<'static, CalloopData>,
     data: &mut CalloopData,
+    advertise_output: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let display_handle = &mut data.display_handle;
     let state = &mut data.state;
@@ -43,7 +44,12 @@ pub fn init_winit(
             model: "Winit".into(),
         },
     );
-    let _global = output.create_global::<Smallvil>(display_handle);
+    // Only advertise as a Wayland global when this is the primary backend.
+    // When opened dynamically via open_window, the headless output already
+    // serves as the client-visible output.
+    if advertise_output {
+        let _global = output.create_global::<Smallvil>(display_handle);
+    }
     output.change_current_state(
         Some(mode),
         Some(Transform::Flipped180),
@@ -56,10 +62,7 @@ pub fn init_winit(
 
     let mut damage_tracker = OutputDamageTracker::from_output(&output);
 
-    std::env::set_var("WAYLAND_DISPLAY", &state.socket_name);
-
-    event_loop
-        .handle()
+    handle
         .insert_source(winit, move |event, _, data| {
             let display = &mut data.display_handle;
             let state = &mut data.state;

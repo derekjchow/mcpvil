@@ -4,7 +4,7 @@ use smithay::{
     desktop::{PopupManager, Space, Window, WindowSurfaceType},
     input::{Seat, SeatState},
     reexports::{
-        calloop::{generic::Generic, EventLoop, Interest, LoopSignal, Mode, PostAction},
+        calloop::{generic::Generic, EventLoop, Interest, LoopHandle, LoopSignal, Mode, PostAction},
         wayland_server::{
             backend::{ClientData, ClientId, DisconnectReason},
             protocol::wl_surface::WlSurface,
@@ -31,6 +31,7 @@ pub struct Smallvil {
 
     pub space: Space<Window>,
     pub loop_signal: LoopSignal,
+    pub loop_handle: LoopHandle<'static, CalloopData>,
 
     // Smithay State
     pub compositor_state: CompositorState,
@@ -43,6 +44,9 @@ pub struct Smallvil {
 
     pub seat: Seat<Self>,
 
+    // Whether the GUI window has been opened
+    pub window_opened: bool,
+
     // Pending screenshot request: (filename, response_tx)
     pub pending_screenshot: Option<(String, tokio::sync::oneshot::Sender<Result<String, String>>)>,
 
@@ -52,7 +56,7 @@ pub struct Smallvil {
 }
 
 impl Smallvil {
-    pub fn new(event_loop: &mut EventLoop<CalloopData>, display: Display<Self>) -> Self {
+    pub fn new(event_loop: &mut EventLoop<CalloopData>, display: Display<Self>, loop_handle: LoopHandle<'static, CalloopData>) -> Self {
         let start_time = std::time::Instant::now();
 
         let dh = display.handle();
@@ -94,6 +98,7 @@ impl Smallvil {
 
             space,
             loop_signal,
+            loop_handle,
             socket_name,
 
             compositor_state,
@@ -104,6 +109,7 @@ impl Smallvil {
             data_device_state,
             popups,
             seat,
+            window_opened: false,
             pending_screenshot: None,
             pending_capture_screenshot: None,
         }
