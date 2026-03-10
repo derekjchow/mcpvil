@@ -8,12 +8,39 @@ MCPvil is a minimal Wayland compositor that exposes its functionality through MC
 
 | Tool | Description |
 |------|-------------|
-| `launch_app` | Launches an application inside the compositor |
-| `screenshot` | Captures a screenshot of the active window and saves it as a PNG |
+| `launch_app` | Launch an application inside the compositor |
+| `close_app` | Kill an application by PID |
+| `screenshot` | Save a screenshot as a PNG file |
+| `capture_screenshot` | Capture a screenshot as base64-encoded PNG |
+| `mouse_move` | Move the mouse pointer to coordinates |
+| `mouse_click` | Click a mouse button at coordinates |
+| `key_press` | Simulate a key press via evdev keycode |
+| `scroll` | Scroll at coordinates in a given direction |
+| `open_window` | Open a GUI window for visual inspection |
 
-## Building
+## Installation
+
+### System Dependencies (Debian/Ubuntu)
 
 ```bash
+sudo apt-get install build-essential pkg-config cmake \
+  libwayland-dev wayland-protocols libinput-dev libudev-dev \
+  libseat-dev libxkbcommon-dev libegl-dev libgles2-mesa-dev \
+  libgbm-dev libdrm-dev libxcb1-dev libx11-xcb-dev \
+  libdbus-1-dev libsystemd-dev libpixman-1-dev
+```
+
+### Install via Cargo
+
+```bash
+cargo install --git https://github.com/derekjchow/mcpvil
+```
+
+### Build from Source
+
+```bash
+git clone https://github.com/derekjchow/mcpvil.git
+cd mcpvil
 cargo build
 ```
 
@@ -23,10 +50,35 @@ MCPvil communicates over stdio using the MCP protocol (newline-delimited JSON-RP
 
 ```bash
 # Run directly (MCP server on stdio, compositor logs on stderr)
-./target/debug/mcpvil
+mcpvil
 
 # With debug logging
-RUST_LOG=debug ./target/debug/mcpvil
+RUST_LOG=debug mcpvil
+
+# GUI mode (opens a window for visual inspection)
+mcpvil --gui
+```
+
+## Setup with MCP Clients
+
+### Claude Code
+
+```bash
+claude mcp add mcpvil -- mcpvil
+```
+
+### Gemini CLI
+
+Add to `~/.gemini/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "mcpvil": {
+      "command": "mcpvil"
+    }
+  }
+}
 ```
 
 ## Dependencies
