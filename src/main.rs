@@ -559,6 +559,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(command) = args_iter.next() {
                 std::process::Command::new(command)
                     .args(args_iter)
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::inherit())
                     .spawn()
                     .ok();
             }
@@ -580,6 +582,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 } => {
                     let mut cmd = std::process::Command::new(&command);
                     cmd.args(&args);
+                    cmd.stdout(std::process::Stdio::null());
+                    cmd.stderr(std::process::Stdio::inherit());
                     let result = match cmd.spawn() {
                         Ok(child) => Ok(child.id()),
                         Err(e) => {

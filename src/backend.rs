@@ -151,7 +151,11 @@ pub fn open_window(data: &mut CalloopData) -> Result<(), Box<dyn std::error::Err
     let saved_wayland = std::env::var("WAYLAND_DISPLAY").ok();
     std::env::remove_var("WAYLAND_DISPLAY");
 
-    let (backend, winit_event_source) = winit::init::<GlesRenderer>()?;
+    let attributes = smithay::reexports::winit::window::Window::default_attributes()
+        .with_inner_size(smithay::reexports::winit::dpi::LogicalSize::new(1920.0, 1080.0))
+        .with_title("MCPvil")
+        .with_visible(true);
+    let (backend, winit_event_source) = winit::init_from_attributes::<GlesRenderer>(attributes)?;
 
     // Restore WAYLAND_DISPLAY for child processes
     if let Some(val) = saved_wayland {
