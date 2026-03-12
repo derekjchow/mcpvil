@@ -531,6 +531,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .init();
     }
 
+    // Ensure XDG_RUNTIME_DIR is set — Wayland sockets are created there.
+    // In containers this variable is often missing, so fall back to a temp directory.
+    if std::env::var_os("XDG_RUNTIME_DIR").is_none() {
+        let dir = std::env::temp_dir().join(format!("mcpvil-runtime-{}", std::process::id()));
+        std::fs::create_dir_all(&dir)?;
+        std::env::set_var("XDG_RUNTIME_DIR", &dir);
+    }
+
     let mut event_loop: EventLoop<CalloopData> = EventLoop::try_new()?;
 
     // Parse CLI arguments
