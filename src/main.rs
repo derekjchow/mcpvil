@@ -2,11 +2,11 @@
 
 mod handlers;
 
+mod backend;
 mod grabs;
-mod headless;
 mod input;
+mod screenshot;
 mod state;
-mod winit;
 
 use rmcp::{
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
@@ -546,12 +546,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         display_handle,
     };
 
-    if gui_mode {
-        crate::winit::init_winit(event_loop.handle(), &mut data, true)?;
-        data.state.window_opened = true;
-    } else {
-        crate::headless::init_headless(&mut event_loop, &mut data)?;
-    }
+    crate::backend::init(&mut event_loop, &mut data, gui_mode)?;
 
     // Set WAYLAND_DISPLAY after backend init so that child processes connect
     // to our compositor, and so winit::init() (if called later via open_window)
@@ -787,22 +782,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let _ = response_tx.send(Ok(()));
                 }
                 McpCommand::OpenWindow { response_tx } => {
-                    if _data.state.window_opened {
+                    if _data.state.winit_state.is_some() {
                         let _ = response_tx.send(Err("Window is already open".to_string()));
                     } else {
-                        let handle = _data.state.loop_handle.clone();
-                        // Temporarily unset WAYLAND_DISPLAY so winit connects to the
-                        // host display server instead of our own compositor socket.
-                        let saved_wayland = std::env::var("WAYLAND_DISPLAY").ok();
-                        std::env::remove_var("WAYLAND_DISPLAY");
-                        let result = crate::winit::init_winit(handle, _data, false);
-                        // Restore WAYLAND_DISPLAY for child processes
-                        if let Some(val) = saved_wayland {
-                            std::env::set_var("WAYLAND_DISPLAY", val);
-                        }
-                        match result {
+                        match crate::backend::open_window(_data) {
                             Ok(()) => {
-                                _data.state.window_opened = true;
                                 let _ = response_tx.send(Ok("GUI window opened".to_string()));
                             }
                             Err(e) => {

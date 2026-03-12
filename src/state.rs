@@ -46,8 +46,8 @@ pub struct Smallvil {
 
     pub seat: Seat<Self>,
 
-    // Whether the GUI window has been opened
-    pub window_opened: bool,
+    // Optional GUI window for visual inspection
+    pub winit_state: Option<crate::backend::WinitState>,
 
     // Pending screenshot request: (filename, response_tx)
     pub pending_screenshot: Option<(String, tokio::sync::oneshot::Sender<Result<String, String>>)>,
@@ -116,7 +116,7 @@ impl Smallvil {
             data_device_state,
             popups,
             seat,
-            window_opened: false,
+            winit_state: None,
             pending_screenshot: None,
             pending_capture_screenshot: None,
         }
