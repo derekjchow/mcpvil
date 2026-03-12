@@ -50,7 +50,8 @@ pub struct Smallvil {
     pub winit_state: Option<crate::backend::WinitState>,
 
     // Pending save_screenshot_to_file request: (filename, response_tx)
-    pub pending_save_screenshot_to_file: Option<(String, tokio::sync::oneshot::Sender<Result<String, String>>)>,
+    pub pending_save_screenshot_to_file:
+        Option<(String, tokio::sync::oneshot::Sender<Result<String, String>>)>,
 
     // Pending capture_screenshot request: response_tx returns (base64_data, width, height)
     #[allow(clippy::type_complexity)]

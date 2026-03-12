@@ -77,7 +77,9 @@ pub fn init(
             // Handle pending resize
             if let Some(new_size) = state.pending_resize.take() {
                 let new_buffer_size: Size<i32, BufferCoords> = (new_size.w, new_size.h).into();
-                buffer = renderer.create_buffer(Fourcc::Argb8888, new_buffer_size).unwrap();
+                buffer = renderer
+                    .create_buffer(Fourcc::Argb8888, new_buffer_size)
+                    .unwrap();
                 output_size = new_size;
 
                 let new_mode = Mode {
@@ -110,7 +112,8 @@ pub fn init(
                 .unwrap();
 
                 // Handle pending save_screenshot_to_file (pixman is always top-down, no vflip needed)
-                if let Some((filename, response_tx)) = state.pending_save_screenshot_to_file.take() {
+                if let Some((filename, response_tx)) = state.pending_save_screenshot_to_file.take()
+                {
                     let result = crate::screenshot::save_screenshot_to_file(
                         &mut renderer,
                         &target,
@@ -167,7 +170,9 @@ pub fn open_window(data: &mut CalloopData) -> Result<(), Box<dyn std::error::Err
     std::env::remove_var("WAYLAND_DISPLAY");
 
     let attributes = smithay::reexports::winit::window::Window::default_attributes()
-        .with_inner_size(smithay::reexports::winit::dpi::LogicalSize::new(1920.0, 1080.0))
+        .with_inner_size(smithay::reexports::winit::dpi::LogicalSize::new(
+            1920.0, 1080.0,
+        ))
         .with_title("MCPvil")
         .with_visible(true);
     let (backend, winit_event_source) = winit::init_from_attributes::<GlesRenderer>(attributes)?;
@@ -253,10 +258,7 @@ fn blit_to_window(
             return;
         };
 
-        let _ = frame.clear(
-            Color32F::BLACK,
-            &[Rectangle::from_size(window_size)],
-        );
+        let _ = frame.clear(Color32F::BLACK, &[Rectangle::from_size(window_size)]);
 
         let src = Rectangle::from_size((buf_size.w as f64, buf_size.h as f64).into());
         let dst = Rectangle::from_size(window_size);

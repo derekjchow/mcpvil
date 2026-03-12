@@ -227,7 +227,9 @@ impl MCPvilServer {
         }
     }
 
-    #[tool(description = "Saves a screenshot of the compositor output to a PNG file on disk. Most callers should use capture_screenshot instead, which returns the image data directly.")]
+    #[tool(
+        description = "Saves a screenshot of the compositor output to a PNG file on disk. Most callers should use capture_screenshot instead, which returns the image data directly."
+    )]
     async fn save_screenshot_to_file(
         &self,
         params: Parameters<SaveScreenshotToFileRequest>,
