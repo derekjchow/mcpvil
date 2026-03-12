@@ -266,7 +266,7 @@ fn blit_to_window(
             dst,
             &[dst],
             &[],
-            Transform::Normal,
+            Transform::Flipped180,
             1.0,
             None,
             &[],
