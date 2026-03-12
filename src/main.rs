@@ -36,7 +36,7 @@ pub struct LaunchAppRequest {
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
-pub struct ScreenshotRequest {
+pub struct SaveScreenshotToFileRequest {
     /// File path to save the screenshot to (PNG format)
     filename: String,
 }
@@ -95,7 +95,7 @@ pub enum McpCommand {
         args: Vec<String>,
         response_tx: tokio::sync::oneshot::Sender<Result<u32, String>>,
     },
-    Screenshot {
+    SaveScreenshotToFile {
         filename: String,
         response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
     },
@@ -141,8 +141,8 @@ impl std::fmt::Debug for McpCommand {
                 .field("command", command)
                 .field("args", args)
                 .finish(),
-            McpCommand::Screenshot { filename, .. } => f
-                .debug_struct("Screenshot")
+            McpCommand::SaveScreenshotToFile { filename, .. } => f
+                .debug_struct("SaveScreenshotToFile")
                 .field("filename", filename)
                 .finish(),
             McpCommand::CaptureScreenshot { .. } => f.debug_struct("CaptureScreenshot").finish(),
@@ -227,16 +227,16 @@ impl MCPvilServer {
         }
     }
 
-    #[tool(description = "Takes a screenshot of the compositor output and saves it as a PNG file")]
-    async fn screenshot(
+    #[tool(description = "Saves a screenshot of the compositor output to a PNG file on disk. Most callers should use capture_screenshot instead, which returns the image data directly.")]
+    async fn save_screenshot_to_file(
         &self,
-        params: Parameters<ScreenshotRequest>,
+        params: Parameters<SaveScreenshotToFileRequest>,
     ) -> Result<CallToolResult, McpError> {
         let filename = params.0.filename.clone();
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
 
         self.command_tx
-            .send(McpCommand::Screenshot {
+            .send(McpCommand::SaveScreenshotToFile {
                 filename: filename.clone(),
                 response_tx,
             })
@@ -589,11 +589,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     };
                     let _ = response_tx.send(result);
                 }
-                McpCommand::Screenshot {
+                McpCommand::SaveScreenshotToFile {
                     filename,
                     response_tx,
                 } => {
-                    _data.state.pending_screenshot = Some((filename, response_tx));
+                    _data.state.pending_save_screenshot_to_file = Some((filename, response_tx));
                 }
                 McpCommand::CaptureScreenshot { response_tx } => {
                     _data.state.pending_capture_screenshot = Some(response_tx);

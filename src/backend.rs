@@ -94,9 +94,9 @@ pub fn init(
                 )
                 .unwrap();
 
-                // Handle pending screenshot (pixman is always top-down, no vflip needed)
-                if let Some((filename, response_tx)) = state.pending_screenshot.take() {
-                    let result = crate::screenshot::take_screenshot(
+                // Handle pending save_screenshot_to_file (pixman is always top-down, no vflip needed)
+                if let Some((filename, response_tx)) = state.pending_save_screenshot_to_file.take() {
+                    let result = crate::screenshot::save_screenshot_to_file(
                         &mut renderer,
                         &target,
                         output_size,

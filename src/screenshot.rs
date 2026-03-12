@@ -5,7 +5,7 @@ use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::{ExportMem, Texture};
 use smithay::utils::Rectangle;
 
-pub fn take_screenshot<R>(
+pub fn save_screenshot_to_file<R>(
     renderer: &mut R,
     target: &R::Framebuffer<'_>,
     size: smithay::utils::Size<i32, smithay::utils::Physical>,

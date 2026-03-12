@@ -49,8 +49,8 @@ pub struct Smallvil {
     // Optional GUI window for visual inspection
     pub winit_state: Option<crate::backend::WinitState>,
 
-    // Pending screenshot request: (filename, response_tx)
-    pub pending_screenshot: Option<(String, tokio::sync::oneshot::Sender<Result<String, String>>)>,
+    // Pending save_screenshot_to_file request: (filename, response_tx)
+    pub pending_save_screenshot_to_file: Option<(String, tokio::sync::oneshot::Sender<Result<String, String>>)>,
 
     // Pending capture_screenshot request: response_tx returns (base64_data, width, height)
     #[allow(clippy::type_complexity)]
@@ -117,7 +117,7 @@ impl Smallvil {
             popups,
             seat,
             winit_state: None,
-            pending_screenshot: None,
+            pending_save_screenshot_to_file: None,
             pending_capture_screenshot: None,
         }
     }

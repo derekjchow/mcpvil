@@ -10,7 +10,7 @@ MCPvil is a minimal Wayland compositor that exposes its functionality through MC
 |------|-------------|
 | `launch_app` | Launch an application inside the compositor |
 | `close_app` | Kill an application by PID |
-| `screenshot` | Save a screenshot as a PNG file |
+| `save_screenshot_to_file` | Save a screenshot as a PNG file |
 | `capture_screenshot` | Capture a screenshot as base64-encoded PNG |
 | `mouse_move` | Move the mouse pointer to coordinates |
 | `mouse_click` | Click a mouse button at coordinates |
