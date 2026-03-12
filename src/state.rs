@@ -13,7 +13,7 @@ use smithay::{
             Display, DisplayHandle,
         },
     },
-    utils::{Logical, Point},
+    utils::{Logical, Physical, Point, Size},
     wayland::{
         compositor::{CompositorClientState, CompositorState},
         output::OutputManagerState,
@@ -56,6 +56,9 @@ pub struct Smallvil {
     #[allow(clippy::type_complexity)]
     pub pending_capture_screenshot:
         Option<tokio::sync::oneshot::Sender<Result<(String, u32, u32), String>>>,
+
+    // Pending resize from the GUI window
+    pub pending_resize: Option<Size<i32, Physical>>,
 }
 
 impl Smallvil {
@@ -119,6 +122,7 @@ impl Smallvil {
             winit_state: None,
             pending_save_screenshot_to_file: None,
             pending_capture_screenshot: None,
+            pending_resize: None,
         }
     }
 

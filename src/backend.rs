@@ -33,7 +33,7 @@ pub fn init(
     let buffer_size: Size<i32, BufferCoords> = (1280, 720).into();
     let mut buffer = renderer.create_buffer(Fourcc::Argb8888, buffer_size)?;
 
-    let output_size: Size<i32, smithay::utils::Physical> = (1280, 720).into();
+    let mut output_size: Size<i32, smithay::utils::Physical> = (1280, 720).into();
     let mode = Mode {
         size: output_size,
         refresh: 60_000,
@@ -73,6 +73,21 @@ pub fn init(
         .insert_source(timer, move |_, _, data| {
             let display = &mut data.display_handle;
             let state = &mut data.state;
+
+            // Handle pending resize
+            if let Some(new_size) = state.pending_resize.take() {
+                let new_buffer_size: Size<i32, BufferCoords> = (new_size.w, new_size.h).into();
+                buffer = renderer.create_buffer(Fourcc::Argb8888, new_buffer_size).unwrap();
+                output_size = new_size;
+
+                let new_mode = Mode {
+                    size: new_size,
+                    refresh: 60_000,
+                };
+                output.change_current_state(Some(new_mode), None, None, None);
+                output.set_preferred(new_mode);
+                damage_tracker = OutputDamageTracker::from_output(&output);
+            }
 
             {
                 let mut target = renderer.bind(&mut buffer).unwrap();
@@ -197,7 +212,10 @@ pub fn open_window(data: &mut CalloopData) -> Result<(), Box<dyn std::error::Err
             WinitEvent::CloseRequested => {
                 state.winit_state = None;
             }
-            _ => {} // Timer handles rendering; ignore Redraw/Resized
+            WinitEvent::Resized { size, .. } => {
+                state.pending_resize = Some(size);
+            }
+            _ => {}
         }
     })?;
 
