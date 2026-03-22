@@ -78,6 +78,22 @@ pub struct KeyPressRequest {
 pub struct OpenWindowRequest {}
 
 #[derive(Serialize, Deserialize, JsonSchema)]
+pub struct MouseDragRequest {
+    /// X coordinate to start the drag from
+    start_x: f64,
+    /// Y coordinate to start the drag from
+    start_y: f64,
+    /// X coordinate to drag to
+    end_x: f64,
+    /// Y coordinate to drag to
+    end_y: f64,
+    /// Mouse button: "left", "right", or "middle" (default: "left")
+    button: Option<String>,
+    /// Number of intermediate move steps between start and end (default: 10)
+    steps: Option<u32>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
 pub struct ScrollRequest {
     /// X coordinate to scroll at
     x: f64,
@@ -128,6 +144,15 @@ pub enum McpCommand {
         amount: f64,
         response_tx: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
+    MouseDrag {
+        start_x: f64,
+        start_y: f64,
+        end_x: f64,
+        end_y: f64,
+        button: u32,
+        steps: u32,
+        response_tx: tokio::sync::oneshot::Sender<Result<(), String>>,
+    },
     OpenWindow {
         response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
     },
@@ -171,6 +196,23 @@ impl std::fmt::Debug for McpCommand {
                 .field("y", y)
                 .field("axis", axis)
                 .field("amount", amount)
+                .finish(),
+            McpCommand::MouseDrag {
+                start_x,
+                start_y,
+                end_x,
+                end_y,
+                button,
+                steps,
+                ..
+            } => f
+                .debug_struct("MouseDrag")
+                .field("start_x", start_x)
+                .field("start_y", start_y)
+                .field("end_x", end_x)
+                .field("end_y", end_y)
+                .field("button", button)
+                .field("steps", steps)
                 .finish(),
             McpCommand::OpenWindow { .. } => f.debug_struct("OpenWindow").finish(),
         }
@@ -364,6 +406,59 @@ impl MCPvilServer {
             ))])),
             Err(e) => Ok(CallToolResult::success(vec![Content::text(format!(
                 "Failed to click: {}",
+                e
+            ))])),
+        }
+    }
+
+    #[tool(
+        description = "Clicks and drags the mouse from one position to another. Useful for selecting multiple objects, panning, rotating, or resizing."
+    )]
+    async fn mouse_drag(
+        &self,
+        params: Parameters<MouseDragRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        let button_name = params.0.button.as_deref().unwrap_or("left");
+        let button_code: u32 = match button_name {
+            "left" => 0x110,   // BTN_LEFT
+            "right" => 0x111,  // BTN_RIGHT
+            "middle" => 0x112, // BTN_MIDDLE
+            other => {
+                return Ok(CallToolResult::success(vec![Content::text(format!(
+                    "Unknown button '{}'. Use 'left', 'right', or 'middle'.",
+                    other
+                ))]));
+            }
+        };
+
+        let steps = params.0.steps.unwrap_or(10).max(1);
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+
+        self.command_tx
+            .send(McpCommand::MouseDrag {
+                start_x: params.0.start_x,
+                start_y: params.0.start_y,
+                end_x: params.0.end_x,
+                end_y: params.0.end_y,
+                button: button_code,
+                steps,
+                response_tx,
+            })
+            .map_err(|e| {
+                McpError::internal_error(format!("Failed to send command: {}", e), None)
+            })?;
+
+        let result = response_rx.await.map_err(|_| {
+            McpError::internal_error("Event loop dropped response channel".to_string(), None)
+        })?;
+
+        match result {
+            Ok(()) => Ok(CallToolResult::success(vec![Content::text(format!(
+                "Dragged {} from ({}, {}) to ({}, {})",
+                button_name, params.0.start_x, params.0.start_y, params.0.end_x, params.0.end_y
+            ))])),
+            Err(e) => Ok(CallToolResult::success(vec![Content::text(format!(
+                "Failed to drag: {}",
                 e
             ))])),
         }
@@ -792,6 +887,114 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .source(AxisSource::Wheel)
                         .value(axis, amount);
                     pointer.axis(&mut _data.state, frame);
+                    pointer.frame(&mut _data.state);
+                    let _ = response_tx.send(Ok(()));
+                }
+                McpCommand::MouseDrag {
+                    start_x,
+                    start_y,
+                    end_x,
+                    end_y,
+                    button,
+                    steps,
+                    response_tx,
+                } => {
+                    use smithay::backend::input::ButtonState;
+                    use smithay::input::pointer::{ButtonEvent, MotionEvent};
+                    use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
+                    use smithay::utils::SERIAL_COUNTER;
+
+                    let pointer = _data.state.seat.get_pointer().unwrap();
+                    let keyboard = _data.state.seat.get_keyboard().unwrap();
+                    let time = _data.state.start_time.elapsed().as_millis() as u32;
+
+                    // 1. Move pointer to start position
+                    let start_pos = (start_x, start_y).into();
+                    let serial = SERIAL_COUNTER.next_serial();
+                    let under = _data.state.surface_under(start_pos);
+
+                    pointer.motion(
+                        &mut _data.state,
+                        under,
+                        &MotionEvent {
+                            location: start_pos,
+                            serial,
+                            time,
+                        },
+                    );
+                    pointer.frame(&mut _data.state);
+
+                    // 2. Focus/raise window under start position
+                    let serial = SERIAL_COUNTER.next_serial();
+                    if !pointer.is_grabbed() {
+                        if let Some((window, _loc)) = _data
+                            .state
+                            .space
+                            .element_under(pointer.current_location())
+                            .map(|(w, l)| (w.clone(), l))
+                        {
+                            _data.state.space.raise_element(&window, true);
+                            keyboard.set_focus(
+                                &mut _data.state,
+                                Some(window.toplevel().unwrap().wl_surface().clone()),
+                                serial,
+                            );
+                            _data.state.space.elements().for_each(|window| {
+                                window.toplevel().unwrap().send_pending_configure();
+                            });
+                        } else {
+                            _data.state.space.elements().for_each(|window| {
+                                window.set_activated(false);
+                                window.toplevel().unwrap().send_pending_configure();
+                            });
+                            keyboard.set_focus(&mut _data.state, Option::<WlSurface>::None, serial);
+                        }
+                    }
+
+                    // 3. Press button at start position
+                    pointer.button(
+                        &mut _data.state,
+                        &ButtonEvent {
+                            button,
+                            state: ButtonState::Pressed,
+                            serial,
+                            time,
+                        },
+                    );
+                    pointer.frame(&mut _data.state);
+
+                    // 4. Move through intermediate steps to end position
+                    for i in 1..=steps {
+                        let t = i as f64 / steps as f64;
+                        let ix = start_x + (end_x - start_x) * t;
+                        let iy = start_y + (end_y - start_y) * t;
+                        let ipos = (ix, iy).into();
+                        let serial = SERIAL_COUNTER.next_serial();
+                        let under = _data.state.surface_under(ipos);
+
+                        pointer.motion(
+                            &mut _data.state,
+                            under,
+                            &MotionEvent {
+                                location: ipos,
+                                serial,
+                                time,
+                            },
+                        );
+                        pointer.frame(&mut _data.state);
+                    }
+
+                    // 5. Release button at end position
+                    let serial = SERIAL_COUNTER.next_serial();
+                    pointer.button(
+                        &mut _data.state,
+                        &ButtonEvent {
+                            button,
+                            state: ButtonState::Released,
+                            serial,
+                            time,
+                        },
+                    );
                     pointer.frame(&mut _data.state);
                     let _ = response_tx.send(Ok(()));
                 }
