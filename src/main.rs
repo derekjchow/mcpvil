@@ -72,6 +72,14 @@ pub struct MouseClickRequest {
 pub struct KeyPressRequest {
     /// Linux evdev keycode (e.g. 28 for Enter, 1 for Escape)
     key: u32,
+    /// Hold Ctrl during key press (e.g. for Ctrl+C copy, Ctrl+V paste)
+    ctrl: Option<bool>,
+    /// Hold Shift during key press
+    shift: Option<bool>,
+    /// Hold Alt during key press
+    alt: Option<bool>,
+    /// Hold Super/Meta during key press
+    meta: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -135,6 +143,7 @@ pub enum McpCommand {
     },
     KeyPress {
         key: u32,
+        modifiers: Vec<u32>,
         response_tx: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
     Scroll {
@@ -464,16 +473,48 @@ impl MCPvilServer {
         }
     }
 
-    #[tool(description = "Simulates a key press and release using a Linux evdev keycode")]
+    #[tool(
+        description = "Simulates a key press and release using a Linux evdev keycode, with optional modifier keys (ctrl, shift, alt, meta) for key combinations like Ctrl+C"
+    )]
     async fn key_press(
         &self,
         params: Parameters<KeyPressRequest>,
     ) -> Result<CallToolResult, McpError> {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
 
+        let mut modifiers = Vec::new();
+        if params.0.ctrl.unwrap_or(false) {
+            modifiers.push(29u32); // KEY_LEFTCTRL
+        }
+        if params.0.shift.unwrap_or(false) {
+            modifiers.push(42u32); // KEY_LEFTSHIFT
+        }
+        if params.0.alt.unwrap_or(false) {
+            modifiers.push(56u32); // KEY_LEFTALT
+        }
+        if params.0.meta.unwrap_or(false) {
+            modifiers.push(125u32); // KEY_LEFTMETA
+        }
+
+        let mut desc = String::new();
+        if params.0.ctrl.unwrap_or(false) {
+            desc.push_str("Ctrl+");
+        }
+        if params.0.shift.unwrap_or(false) {
+            desc.push_str("Shift+");
+        }
+        if params.0.alt.unwrap_or(false) {
+            desc.push_str("Alt+");
+        }
+        if params.0.meta.unwrap_or(false) {
+            desc.push_str("Meta+");
+        }
+        desc.push_str(&format!("{}", params.0.key));
+
         self.command_tx
             .send(McpCommand::KeyPress {
                 key: params.0.key,
+                modifiers,
                 response_tx,
             })
             .map_err(|e| {
@@ -487,7 +528,7 @@ impl MCPvilServer {
         match result {
             Ok(()) => Ok(CallToolResult::success(vec![Content::text(format!(
                 "Key {} pressed and released",
-                params.0.key
+                desc
             ))])),
             Err(e) => Ok(CallToolResult::success(vec![Content::text(format!(
                 "Failed to press key: {}",
@@ -823,15 +864,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     pointer.frame(&mut _data.state);
                     let _ = response_tx.send(Ok(()));
                 }
-                McpCommand::KeyPress { key, response_tx } => {
+                McpCommand::KeyPress {
+                    key,
+                    modifiers,
+                    response_tx,
+                } => {
                     use smithay::backend::input::KeyState;
                     use smithay::input::keyboard::FilterResult;
                     use smithay::utils::SERIAL_COUNTER;
 
-                    let serial = SERIAL_COUNTER.next_serial();
                     let time = _data.state.start_time.elapsed().as_millis() as u32;
                     let keyboard = _data.state.seat.get_keyboard().unwrap();
 
+                    // Press modifier keys
+                    for &modifier in &modifiers {
+                        let serial = SERIAL_COUNTER.next_serial();
+                        keyboard.input::<(), _>(
+                            &mut _data.state,
+                            modifier.into(),
+                            KeyState::Pressed,
+                            serial,
+                            time,
+                            |_, _, _| FilterResult::Forward,
+                        );
+                    }
+
+                    // Press the main key
+                    let serial = SERIAL_COUNTER.next_serial();
                     keyboard.input::<(), _>(
                         &mut _data.state,
                         key.into(),
@@ -841,6 +900,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         |_, _, _| FilterResult::Forward,
                     );
 
+                    // Release the main key
                     let serial = SERIAL_COUNTER.next_serial();
                     keyboard.input::<(), _>(
                         &mut _data.state,
@@ -850,6 +910,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         time,
                         |_, _, _| FilterResult::Forward,
                     );
+
+                    // Release modifier keys in reverse order
+                    for &modifier in modifiers.iter().rev() {
+                        let serial = SERIAL_COUNTER.next_serial();
+                        keyboard.input::<(), _>(
+                            &mut _data.state,
+                            modifier.into(),
+                            KeyState::Released,
+                            serial,
+                            time,
+                            |_, _, _| FilterResult::Forward,
+                        );
+                    }
+
                     let _ = response_tx.send(Ok(()));
                 }
                 McpCommand::Scroll {
